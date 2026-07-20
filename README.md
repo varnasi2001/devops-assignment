@@ -88,63 +88,29 @@ All screenshots taken from the running local demo. Full-size files under `docs/s
 
 ### Infrastructure provisioning
 
-**Terraform brings up the cluster + wrapped charts (ingress-nginx, Argo CD, kube-prometheus-stack):**
 
 ![terraform apply](docs/screenshots/01-terraform-apply.png)
 
-**4-node Minikube cluster with cilium CNI:**
-
 ![kubectl get nodes](docs/screenshots/02-cluster-nodes.png)
 
-**Docker Desktop showing the 4 node containers:**
-
 ![Docker Desktop](docs/screenshots/03-docker-containers.png)
-
-### Application deployment
 
 **`scripts/deploy.sh` runs terraform apply → docker build → minikube image load → helm install:**
 
 ![deploy.sh](docs/screenshots/04-deploy-script.png)
 
-**Backend pods running (3 replicas, all Ready) + Argo CD admin password fetch:**
-
 ![backend pods](docs/screenshots/05-pods-running.png)
-
-**Backend serving traffic — kube-probe (liveness/readiness) + Prometheus scraping /metrics:**
 
 ![backend logs](docs/screenshots/06-backend-logs.png)
 
-### Ingress + API validation
-
-**LoadBalancer service on `127.0.0.1` (via `minikube tunnel`) + `/healthz` reachable via `articles.local`:**
-
 ![ingress + healthz](docs/screenshots/07-ingress-loadbalancer.png)
-
-**Full CRUD test (`scripts/test-api.sh`) — Create, List, Read, Update, Delete, verify-delete, all pass:**
 
 ![api test passing](docs/screenshots/08-api-test-passing.png)
 
-### GitOps + observability
-
-**Argo CD UI — installed via Terraform, reachable at `argocd.local`:**
-
 ![Argo CD](docs/screenshots/09-argocd-ui.png)
-
-**Grafana — pre-provisioned Kubernetes dashboards (via kube-prometheus-stack) + custom "Articles" folder:**
 
 ![Grafana dashboards](docs/screenshots/10-grafana-dashboards.png)
 
-**Grafana panel — CPU + memory usage from kube-state-metrics + node-exporter:**
-
 ![Grafana panel](docs/screenshots/11-grafana-panel.png)
 
-**Prometheus targets — all 3 backend pods scraped via `ServiceMonitor`, plus cluster-level scrape jobs:**
-
 ![Prometheus targets](docs/screenshots/12-prometheus-targets.png)
-
-## Cleanup
-
-```
-cd terraform
-terraform destroy -auto-approve
-```
