@@ -1,0 +1,37 @@
+argo-cd:
+  global:
+    domain: argocd.local
+
+  configs:
+    params:
+      server.insecure: true
+    cm:
+      timeout.reconciliation: "30s"
+      resource.exclusions: ""
+
+  server:
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      hostname: argocd.local
+
+  applicationSet:
+    enabled: true
+  notifications:
+    enabled: false
+  dex:
+    enabled: false
+
+  controller:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+  repoServer:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi

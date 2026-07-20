@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-init-rs
+  labels: {{- include "mongodb.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels: {{- include "mongodb.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init-rs
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        env:
+        - name: RS_NAME
+          value: {{ .Values.replicaSetName }}
+        - name: REPLICAS
+          value: "{{ .Values.replicaCount }}"
+        command:
+        - bash
+        - -c
+        - |
+          set -e
+
+          for i in $(seq 0 $((REPLICAS-1))); do
+            until mongosh --quiet --host "mongodb-$i.mongodb-headless.mongodb.svc.cluster.local:27017" --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; do
+              echo "  mongodb-$i not up, sleeping 5s"
+              sleep 5
+            done
+            echo "  mongodb-$i is up"
+          done
+
+          IS_UP=$(mongosh --quiet --host "mongodb-0.mongodb-headless:27017" --eval 'try { rs.status().ok } catch(e) { 0 }')
+          if [ "$IS_UP" = "1" ]; then
+            echo "replica set already initiated, exiting"
+            exit 0
+          fi
+
+          MEMBERS="["
+          for i in $(seq 0 $((REPLICAS-1))); do
+            [ $i -gt 0 ] && MEMBERS="$MEMBERS,"
+            MEMBERS="$MEMBERS{_id: $i, host: \"mongodb-$i.mongodb-headless.mongodb.svc.cluster.local:27017\"}"
+          done
+          MEMBERS="$MEMBERS]"
+
+          echo "initiating replica set..."
+          mongosh --host "mongodb-0.mongodb-headless:27017" --eval "
+            rs.initiate({_id: '$RS_NAME', members: $MEMBERS});
+          "
+
+          echo "waiting for PRIMARY..."
+          for i in $(seq 1 60); do
+            PRIMARY=$(mongosh --quiet --host "mongodb-0.mongodb-headless:27017" --eval "rs.status().members.filter(m => m.stateStr === 'PRIMARY').length" 2>/dev/null || echo 0)
+            [ "$PRIMARY" = "1" ] && { echo "PRIMARY elected"; break; }
+            echo "  waiting ($i/60)"
+            sleep 2
+          done
+
+          echo "done"

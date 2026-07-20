@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-cd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+    targetRevision: main
+    ref: values
+  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+    targetRevision: main
+    path: helm-templates/argo-cd-9.5.21
+    helm:
+      releaseName: argocd
+      valueFiles:
+      - $values/helm-overrides/argo-cd/custom-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true

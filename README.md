@@ -1,0 +1,336 @@
+# Articles API on Kubernetes
+
+A CRUD REST API in Node.js backed by a 3-node MongoDB replica set, running on a Minikube cluster that Terraform brings up. Everything else — ingress, Argo CD, Prometheus, Grafana — installs on top through Helm. GitOps via Argo CD if you want it.
+
+## What's in here
+
+```
+backend/                     Node.js source + Dockerfile
+terraform/                   Minikube + wrapped Helm charts (ingress, argocd, prometheus-stack)
+helm-templates/              chart definitions
+  argo-cd-9.5.21/            wrapper — declares upstream argo-cd 9.5.21 as a dependency
+  ingress-nginx-4.11.2/      wrapper
+  kube-prometheus-stack-62.6.0/  wrapper (Prometheus + Grafana + node-exporter + kube-state-metrics)
+  articles-backend/          hand-written chart for our app
+  mongodb/                   hand-written chart, 3-member replica set with keyfile auth
+helm-overrides/              one folder per chart, one file `custom-values.yaml`
+  argo-cd/
+  ingress-nginx/
+  kube-prometheus-stack/
+  articles-backend/
+  mongodb/
+argocd/
+  master-argo-app.yaml       root app-of-apps
+  applications/              one Application per chart, each points at helm-templates + helm-overrides
+scripts/
+  deploy.sh                  one-shot bring-up (terraform + docker build + helm install)
+  test-api.sh                curl all five endpoints end-to-end
+```
+
+## How the pieces fit
+
+```
+       curl / postman
+             │
+             ▼
+       ingress-nginx      (host: articles.local)
+             │
+             ▼
+      articles-backend     3 replicas, HPA 3-10, anti-affinity soft
+             │
+             ▼
+       mongodb rs0        3-member statefulset, keyfile auth, pdb maxUnavail 1
+                          all three seeds in the connection string
+```
+
+Prometheus scrapes the backend `/metrics` via a ServiceMonitor. Grafana ships pre-provisioned with an Articles API dashboard.
+
+## Prerequisites
+
+Install these before running anything:
+
+- Docker 24+
+- Minikube 1.33+
+- kubectl 1.30+
+- helm 3.14+
+- terraform 1.6+
+- jq (only for the test script)
+
+On mac: `brew install docker minikube kubectl helm terraform jq`
+
+## Quick start
+
+Log in to your registry first:
+```
+docker login                                      # Docker Hub
+# or
+echo $GHCR_PAT | docker login ghcr.io -u <gh-username> --password-stdin
+```
+
+Then:
+```
+cd devops-assignment
+
+# Docker Hub
+REGISTRY=<dockerhub-username> ./scripts/deploy.sh
+
+# or ghcr.io
+REGISTRY=ghcr.io/<github-username> ./scripts/deploy.sh
+```
+
+That does: terraform apply, docker build, docker push, minikube image load, helm install mongodb + articles.
+
+If you skip `REGISTRY=`, the script still runs but only loads the image into Minikube — nothing is pushed to a registry. Fine for a quick smoke test, not for the assignment deliverable.
+
+Then add to `/etc/hosts`:
+```
+127.0.0.1 articles.local argocd.local grafana.local prometheus.local
+```
+
+And in a second terminal:
+```
+sudo minikube tunnel --profile articles-hoi
+```
+Leave that running. It's what makes `127.0.0.1:80` reach the cluster's ingress.
+
+Test the API:
+```
+./scripts/test-api.sh
+```
+
+## Step by step
+
+If you'd rather not run the one-shot script:
+
+**1. Bring up the cluster**
+```
+cd terraform
+terraform init
+terraform apply -auto-approve
+```
+That creates a 4-node Minikube (1 control-plane + 3 workers) and installs ingress-nginx, Argo CD, and kube-prometheus-stack.
+
+**2. Build the backend image + push to a registry**
+
+Pick one:
+
+Docker Hub:
+```
+docker login
+docker build -t <dockerhub-username>/articles-api:v1 backend/
+docker push <dockerhub-username>/articles-api:v1
+```
+
+GitHub Container Registry (`ghcr.io`):
+```
+echo $GHCR_PAT | docker login ghcr.io -u <github-username> --password-stdin
+docker build -t ghcr.io/<github-username>/articles-api:v1 backend/
+docker push ghcr.io/<github-username>/articles-api:v1
+```
+(`$GHCR_PAT` is a GitHub personal access token with `write:packages` scope.)
+
+Then update `helm-overrides/articles-backend/custom-values.yaml` → `image.repository` to the full path (`<username>/articles-api` or `ghcr.io/<username>/articles-api`).
+
+Optional but recommended for local dev — also load the image straight into Minikube so pod-start doesn't pull from the registry every time:
+```
+minikube image load <full-image-name>:v1 --profile articles-hoi
+```
+With `image.pullPolicy: IfNotPresent`, Minikube uses the local copy if it exists and falls back to the registry pull otherwise.
+
+`scripts/deploy.sh` automates all three (build + push + load) when you set `REGISTRY=<username>` (Docker Hub) or `REGISTRY=ghcr.io/<username>` (ghcr.io) in the environment.
+
+**3. Install MongoDB**
+```
+helm upgrade --install mongodb helm-templates/mongodb \
+  -f helm-overrides/mongodb/custom-values.yaml \
+  -n mongodb --create-namespace --wait
+```
+The chart auto-generates the root password + keyfile at install time and runs a post-install Job that fires `rs.initiate()` once all three pods are up.
+
+Verify the replica set:
+```
+kubectl -n mongodb exec -it mongodb-0 -- mongosh \
+  -u admin -p "$(kubectl -n mongodb get secret mongodb-root -o jsonpath='{.data.password}' | base64 -d)" \
+  --eval "rs.status().members.forEach(m => print(m.name, m.stateStr))"
+```
+You should see one PRIMARY, two SECONDARY.
+
+**4. Copy the mongo secret into the articles namespace**
+```
+kubectl create namespace articles
+kubectl -n mongodb get secret mongodb-root -o yaml \
+  | sed 's/namespace: mongodb/namespace: articles/' | kubectl apply -f -
+```
+
+**5. Install the backend**
+```
+helm upgrade --install articles helm-templates/articles-backend \
+  -f helm-overrides/articles-backend/custom-values.yaml \
+  -n articles --wait
+```
+
+**6. Hit it**
+```
+curl -X POST http://articles.local/articles \
+  -H "Content-Type: application/json" \
+  -d '{"title":"hello","body":"world","author":"me","tags":["demo"]}'
+
+curl http://articles.local/articles
+
+curl http://articles.local/articles/<id>
+
+curl -X PUT http://articles.local/articles/<id> \
+  -H "Content-Type: application/json" -d '{"title":"updated"}'
+
+curl -X DELETE http://articles.local/articles/<id>
+```
+
+## Helm chart layout — why templates + overrides are split
+
+Same idea as `Meesho/devops-infra-helm-charts`. Two folders:
+
+- `helm-templates/<chart>-<version>/` holds the chart definition. For upstream community charts it's a wrapper — a `Chart.yaml` with a single `dependencies:` entry pointing at the upstream repo. For our own charts (articles-backend, mongodb) it holds the templates themselves.
+- `helm-overrides/<chart>/custom-values.yaml` holds the actual values. Passed with `-f` at install time.
+
+This assignment has one cluster so the overrides folder is flat. In a multi-cluster setup you'd add a cluster name in between: `helm-overrides/<cluster>/<chart>/custom-values.yaml`.
+
+Every helm install in `deploy.sh` uses:
+```
+helm install <name> helm-templates/<chart> -f helm-overrides/<chart>/custom-values.yaml
+```
+
+## GitOps with Argo CD
+
+Terraform installs Argo CD by default. Get the admin password:
+```
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
+
+Open `http://argocd.local` (admin / that password).
+
+To wire your fork to Argo CD:
+1. Edit every file under `argocd/` and replace `github.com/CHANGE_ME/devops-assignment` with your fork URL.
+2. Push.
+3. Apply the root app:
+   ```
+   kubectl apply -f argocd/master-argo-app.yaml
+   ```
+
+Argo CD then reads `argocd/applications/` and creates child Apps for:
+- argo-cd (self-manages)
+- ingress-nginx
+- kube-prometheus-stack
+- mongodb
+- articles-backend
+
+Each child App uses two sources — one for the chart under `helm-templates/`, one for the override file under `helm-overrides/`. Sync waves order them so Argo CD comes first, then ingress, then the rest.
+
+Change any file in `helm-overrides/` and Argo CD reconciles within 3 min (or `argocd app sync <name>` to force it).
+
+## Observability
+
+Prometheus + Grafana come with the `kube-prometheus-stack` chart. The backend exposes `/metrics` on port 3000 (Node.js default runtime metrics + a custom `http_request_duration_seconds` histogram). The backend chart also ships a `ServiceMonitor` so Prometheus finds it automatically — no annotation-based scraping needed.
+
+Access:
+- Grafana: `http://grafana.local` — admin / admin. There's a dashboard called "Articles API" under the "Articles" folder with RPS and p95 latency panels.
+- Prometheus: `http://prometheus.local` — for ad-hoc PromQL.
+
+To add another dashboard: drop the JSON under `helm-overrides/kube-prometheus-stack/custom-values.yaml` → `grafana.dashboards.<folder>.<name>.json`.
+
+## Hostnames — where they come from and how traffic reaches them
+
+Four hostnames end up on `/etc/hosts`:
+
+- `articles.local` — set in `helm-overrides/articles-backend/custom-values.yaml` → `ingress.host`
+- `argocd.local` — set in `helm-overrides/argo-cd/custom-values.yaml` → `argo-cd.server.ingress.hostname` (and `argo-cd.global.domain`)
+- `grafana.local` — set in `helm-overrides/kube-prometheus-stack/custom-values.yaml` → `kube-prometheus-stack.grafana.ingress.hosts[0]`
+- `prometheus.local` — same file, under `kube-prometheus-stack.prometheus.ingress.hosts[0]`
+
+Change any of those, rerun `helm upgrade` (or let Argo CD reconcile), update `/etc/hosts`.
+
+Traffic flow when you `curl http://articles.local`:
+
+1. Your shell resolves `articles.local` → `127.0.0.1` (via `/etc/hosts`).
+2. `sudo minikube tunnel` (running in a second terminal) forwards `127.0.0.1:80` on your host to the ingress-nginx pod inside Minikube. Without the tunnel, nothing on your host would reach the cluster's ingress.
+3. Ingress-nginx sees `Host: articles.local` in the request, looks up which Ingress resource claims that hostname, and forwards to the backend Service.
+4. Backend Service round-robins to one of the backend pods.
+
+Same story for the other three hostnames, just different backends.
+
+## HA — what stops it going down
+
+- Backend: 3 replicas, HPA scales 3-10 on CPU 70%, rolling update `maxSurge:1 maxUnavailable:0`, PDB `maxUnavailable:1`, soft anti-affinity across nodes.
+- MongoDB: 3-member replica set, quorum stays at 2/3 even during a single pod loss, PDB `maxUnavailable:1`, soft anti-affinity.
+- Probes on both: startup + readiness + liveness. Backend's readiness probe checks the mongo connection state before saying "ready", so kubectl doesn't route traffic to a pod that hasn't finished connecting.
+- Mongo connection uses a replica-set-aware URI with all three seed hosts, so the driver handles failover.
+
+## Design notes
+
+Longer writeup in `docs/DESIGN_DECISIONS.md`.
+
+## Screenshots — end-to-end validation
+
+All screenshots taken from the running local demo. Full-size files under `docs/screenshots/`.
+
+### Infrastructure provisioning
+
+**Terraform brings up the cluster + wrapped charts (ingress-nginx, Argo CD, kube-prometheus-stack):**
+
+![terraform apply](docs/screenshots/01-terraform-apply.png)
+
+**4-node Minikube cluster with cilium CNI:**
+
+![kubectl get nodes](docs/screenshots/02-cluster-nodes.png)
+
+**Docker Desktop showing the 4 node containers:**
+
+![Docker Desktop](docs/screenshots/03-docker-containers.png)
+
+### Application deployment
+
+**`scripts/deploy.sh` runs terraform apply → docker build → minikube image load → helm install:**
+
+![deploy.sh](docs/screenshots/04-deploy-script.png)
+
+**Backend pods running (3 replicas, all Ready) + Argo CD admin password fetch:**
+
+![backend pods](docs/screenshots/05-pods-running.png)
+
+**Backend serving traffic — kube-probe (liveness/readiness) + Prometheus scraping /metrics:**
+
+![backend logs](docs/screenshots/06-backend-logs.png)
+
+### Ingress + API validation
+
+**LoadBalancer service on `127.0.0.1` (via `minikube tunnel`) + `/healthz` reachable via `articles.local`:**
+
+![ingress + healthz](docs/screenshots/07-ingress-loadbalancer.png)
+
+**Full CRUD test (`scripts/test-api.sh`) — Create, List, Read, Update, Delete, verify-delete, all pass:**
+
+![api test passing](docs/screenshots/08-api-test-passing.png)
+
+### GitOps + observability
+
+**Argo CD UI — installed via Terraform, reachable at `argocd.local`:**
+
+![Argo CD](docs/screenshots/09-argocd-ui.png)
+
+**Grafana — pre-provisioned Kubernetes dashboards (via kube-prometheus-stack) + custom "Articles" folder:**
+
+![Grafana dashboards](docs/screenshots/10-grafana-dashboards.png)
+
+**Grafana panel — CPU + memory usage from kube-state-metrics + node-exporter:**
+
+![Grafana panel](docs/screenshots/11-grafana-panel.png)
+
+**Prometheus targets — all 3 backend pods scraped via `ServiceMonitor`, plus cluster-level scrape jobs:**
+
+![Prometheus targets](docs/screenshots/12-prometheus-targets.png)
+
+## Cleanup
+
+```
+cd terraform
+terraform destroy -auto-approve
+```

@@ -1,0 +1,42 @@
+replicaCount: 3
+replicaSetName: rs0
+
+image:
+  repository: mongo
+  tag: "7.0"
+  pullPolicy: IfNotPresent
+
+auth:
+  rootUser: admin
+  existingSecret: ""
+
+storage:
+  size: 5Gi
+  storageClassName: standard
+
+service:
+  port: 27017
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+
+podAntiAffinity:
+  enabled: true
+  type: soft
+  topologyKey: kubernetes.io/hostname
+
+probes:
+  readinessInitialDelay: 10
+  livenessInitialDelay: 30
+
+serviceAccount:
+  create: true

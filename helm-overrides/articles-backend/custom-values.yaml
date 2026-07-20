@@ -1,0 +1,96 @@
+replicaCount: 3
+
+image:
+  # Push to your registry, then set repository below (or override at install time).
+  # Docker Hub:  <your-username>/articles-api
+  # ghcr.io:     ghcr.io/<your-github-username>/articles-api
+  repository: CHANGE_ME/articles-api
+  tag: v1
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  host: articles.local
+  path: /
+  pathType: Prefix
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+
+podAntiAffinity:
+  enabled: true
+  type: soft
+  topologyKey: kubernetes.io/hostname
+
+nodeSelector: {}
+tolerations: []
+
+env:
+  MONGO_HOST: mongodb-headless.mongodb.svc.cluster.local
+  MONGO_PORT: "27017"
+  MONGO_REPLICA_SET: rs0
+  MONGO_DB: articles
+  MONGO_REPLICAS: "3"
+
+mongoSecret:
+  # Mongo auth is off — no credentials needed. Flip to true and provide a secret
+  # if you re-enable --auth on the mongodb chart.
+  enabled: false
+  name: mongodb-root
+  userKey: username
+  passwordKey: password
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    path: /healthz
+    periodSeconds: 5
+    failureThreshold: 30
+
+serviceMonitor:
+  enabled: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

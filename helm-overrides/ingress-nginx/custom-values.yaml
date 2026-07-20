@@ -1,0 +1,22 @@
+ingress-nginx:
+  controller:
+    # LoadBalancer type so `minikube tunnel` forwards host 127.0.0.1:80 to it
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Local
+    # Schedule on any node — no ingress-ready label needed for a Minikube demo
+    nodeSelector: {}
+    # Tolerate control-plane taint (helpful for single-node clusters; harmless on multi-node)
+    tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Equal
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Equal
+      effect: NoSchedule
+    metrics:
+      enabled: false
+      serviceMonitor:
+        enabled: false
+    admissionWebhooks:
+      enabled: false

@@ -1,0 +1,26 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/*.tfvars
+!terraform/*.tfvars.example
+
+# Helm
+helm/*/charts/
+helm/*/*.tgz
+
+# Kubeconfig
+kubeconfig
+*.kubeconfig
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: articles-backend
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+    targetRevision: main
+    ref: values
+  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+    targetRevision: main
+    path: helm-templates/articles-backend
+    helm:
+      releaseName: articles
+      valueFiles:
+      - $values/helm-overrides/articles-backend/custom-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: articles
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    jsonPointers:
+    - /spec/replicas

@@ -1,0 +1,68 @@
+{
+  "info": {
+    "name": "Articles API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "articles-api-collection"
+  },
+  "variable": [
+    { "key": "BASE", "value": "http://articles.local", "type": "string" },
+    { "key": "ID",   "value": "",                       "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{BASE}}/healthz" }
+    },
+    {
+      "name": "Readiness",
+      "request": { "method": "GET", "url": "{{BASE}}/readyz" }
+    },
+    {
+      "name": "1. Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Kubernetes 1.35\",\n  \"body\":  \"Multi-zone active-active tips\",\n  \"author\": \"roshan\",\n  \"tags\":  [\"k8s\", \"sre\"]\n}"
+        },
+        "url": "{{BASE}}/articles"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": ["pm.collectionVariables.set('ID', pm.response.json()._id);"]
+        }
+      }]
+    },
+    {
+      "name": "2. List",
+      "request": { "method": "GET", "url": "{{BASE}}/articles" }
+    },
+    {
+      "name": "3. Read (by id)",
+      "request": { "method": "GET", "url": "{{BASE}}/articles/{{ID}}" }
+    },
+    {
+      "name": "4. Update",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Kubernetes 1.35 (revised)\",\n  \"body\":  \"Multi-zone A-A + Zone C\",\n  \"tags\":  [\"k8s\", \"sre\", \"multizone\"]\n}"
+        },
+        "url": "{{BASE}}/articles/{{ID}}"
+      }
+    },
+    {
+      "name": "5. Delete",
+      "request": { "method": "DELETE", "url": "{{BASE}}/articles/{{ID}}" }
+    },
+    {
+      "name": "Verify delete (expects 404)",
+      "request": { "method": "GET", "url": "{{BASE}}/articles/{{ID}}" }
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mongodb.fullname" . }}
+  labels: {{- include "mongodb.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "mongodb.headless" . }}
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {{- include "mongodb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "mongodb.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "mongodb.fullname" . }}
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+      {{- if .Values.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.podAntiAffinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels: {{- include "mongodb.selectorLabels" . | nindent 16 }}
+            topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels: {{- include "mongodb.selectorLabels" . | nindent 18 }}
+              topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
+          {{- end }}
+      {{- end }}
+      initContainers:
+      - name: data-perm
+        image: busybox:1.36
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        command: ["sh","-c","chown -R 999:999 /data/db && chmod 700 /data/db"]
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+      containers:
+      - name: mongod
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - mongod
+        - --replSet={{ .Values.replicaSetName }}
+        - --bind_ip_all
+        - --dbpath=/data/db
+        ports:
+        - name: mongodb
+          containerPort: 27017
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+        readinessProbe:
+          exec:
+            command: ["mongosh","--host","127.0.0.1","--quiet","--eval","db.adminCommand('ping').ok"]
+          initialDelaySeconds: {{ .Values.probes.readinessInitialDelay }}
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["mongosh","--host","127.0.0.1","--quiet","--eval","db.adminCommand('ping').ok"]
+          initialDelaySeconds: {{ .Values.probes.livenessInitialDelay }}
+          periodSeconds: 20
+          timeoutSeconds: 5
+        resources: {{- toYaml .Values.resources | nindent 10 }}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: {{ .Values.storage.storageClassName }}
+      resources:
+        requests:
+          storage: {{ .Values.storage.size }}
