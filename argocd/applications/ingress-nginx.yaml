@@ -10,10 +10,10 @@ metadata:
 spec:
   project: default
   sources:
-  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+  - repoURL: https://github.com/varnasi2001/devops-assignment
     targetRevision: main
     ref: values
-  - repoURL: https://github.com/CHANGE_ME/devops-assignment
+  - repoURL: https://github.com/varnasi2001/devops-assignment
     targetRevision: main
     path: helm-templates/ingress-nginx-4.11.2
     helm:
