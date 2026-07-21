@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/CHANGE_ME/devops-assignment
+    repoURL: https://github.com/varnasi2001/devops-assignment
     targetRevision: main
     path: argocd/applications
     directory:
